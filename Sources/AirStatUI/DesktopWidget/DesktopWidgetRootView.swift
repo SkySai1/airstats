@@ -23,8 +23,8 @@ final class DesktopWidgetLayout {
 /// The panel is a place you look *at*; the desktop widget is something you look *past*.
 /// So every module here is the same three things in the same order: a header line
 /// carrying the one reading that matters, a bar, and supporting rows indented under
-/// the title. Compact keeps one supporting row, expanded keeps them all. Nothing here
-/// gets the panel's charts, its two-column grids or its 20pt headline.
+/// the title. Compact keeps one supporting row, expanded keeps them all. AI instances
+/// keep their own models and charts in both sizes so one server cannot hide another.
 struct DesktopWidgetRootView: View {
     let engine: MetricsEngine
     let settings: SettingsStore
@@ -36,7 +36,9 @@ struct DesktopWidgetRootView: View {
     /// unique or SwiftUI will reuse the wrong view.
     private var modules: [PanelModule] {
         var seen = Set<PanelModule>()
-        return desktopWidget.modules.filter { seen.insert($0).inserted }
+        return desktopWidget.modules.filter {
+            ($0 != .ai || settings.settings.ai.isMonitoringEnabled) && seen.insert($0).inserted
+        }
     }
 
     private var width: CGFloat { CGFloat(layout?.width ?? desktopWidget.width) }
@@ -102,23 +104,43 @@ private struct DesktopWidgetModuleView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Space.xs) {
-            switch readout {
-            case .value(let readout):
-                DesktopWidgetHeaderRow(readout: readout)
-                barRow(fraction: readout.fraction, tint: readout.tint)
-                ForEach(details(of: readout)) { detail in
-                    DesktopWidgetDetailRow(detail: detail)
-                        .padding(.leading, Self.indent)
+            if module == .ai {
+                aiBody
+            } else {
+                switch readout {
+                case .value(let readout):
+                    DesktopWidgetHeaderRow(readout: readout)
+                    barRow(fraction: readout.fraction, tint: readout.tint)
+                    ForEach(details(of: readout)) { detail in
+                        DesktopWidgetDetailRow(detail: detail)
+                            .padding(.leading, Self.indent)
+                    }
+                    history(tint: readout.tint)
+                case .failure(let failure):
+                    // One line, not four. The panel has room to explain why a sensor is
+                    // missing; a HUD that spends three lines saying "no reading" is
+                    // charging full price for a module that has nothing to report.
+                    DesktopWidgetHeaderRow(readout: DesktopWidgetReadout(module: module, value: nil),
+                                           failure: failure)
+                    if failure == .pending { pendingReservation }
                 }
-                history(tint: readout.tint)
-            case .failure(let failure):
-                // One line, not four. The panel has room to explain why a sensor is
-                // missing; a HUD that spends three lines saying "no reading" is
-                // charging full price for a module that has nothing to report.
-                DesktopWidgetHeaderRow(readout: DesktopWidgetReadout(module: module, value: nil),
-                                 failure: failure)
-                if failure == .pending { pendingReservation }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var aiBody: some View {
+        switch engine.ai {
+        case .value(let snapshot):
+            DesktopWidgetHeaderRow(readout: DesktopWidgetReadout(
+                module: .ai, value: AIReadoutSummary.value(snapshot)))
+            AIInstanceMetricsView(snapshot: snapshot, history: engine.aiHistory,
+                                  isCompact: isCompact,
+                                  tint: Design.Palette.metric(.ai))
+                .padding(.leading, Self.indent)
+        case .failure(let failure):
+            DesktopWidgetHeaderRow(readout: DesktopWidgetReadout(module: .ai, value: nil),
+                                   failure: failure)
         }
     }
 
@@ -215,6 +237,7 @@ private struct DesktopWidgetModuleView: View {
         case .processes: return 4
         case .network, .disk: return 2
         case .gpu, .battery, .thermal: return 1
+        case .ai: return 2
         }
     }
 
@@ -233,6 +256,7 @@ private struct DesktopWidgetModuleView: View {
         case .thermal: return thermalReadout
         case .processes: return processReadout
         case .system: return systemReadout
+        case .ai: return aiReadout
         }
     }
 
@@ -390,6 +414,12 @@ private struct DesktopWidgetModuleView: View {
                 DesktopWidgetDetail("host", "Host", system.computerName),
             ]
             return readout
+        }
+    }
+
+    private var aiReadout: MetricState<DesktopWidgetReadout> {
+        engine.ai.map { snapshot in
+            DesktopWidgetReadout(module: module, value: AIReadoutSummary.value(snapshot))
         }
     }
 }

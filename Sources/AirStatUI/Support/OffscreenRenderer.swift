@@ -26,7 +26,7 @@ public enum OffscreenRenderer {
     }
 
     public enum Scenario: String, CaseIterable, Sendable {
-        case nominal, underLoad, charging, degraded, pending
+        case nominal, underLoad, charging, degraded, pending, aiMonitoring, aiPrefill, aiSlots
 
         public var snapshot: SystemSnapshot {
             switch self {
@@ -35,6 +35,18 @@ public enum OffscreenRenderer {
             case .charging: return SnapshotFixtures.charging
             case .degraded: return SnapshotFixtures.degraded
             case .pending: return SnapshotFixtures.pending
+            case .aiMonitoring:
+                var snapshot = SnapshotFixtures.nominal
+                snapshot.ai = .value(SnapshotFixtures.ai())
+                return snapshot
+            case .aiPrefill:
+                var snapshot = SnapshotFixtures.nominal
+                snapshot.ai = .value(SnapshotFixtures.aiPrefill())
+                return snapshot
+            case .aiSlots:
+                var snapshot = SnapshotFixtures.nominal
+                snapshot.ai = .value(SnapshotFixtures.aiSlots())
+                return snapshot
             }
         }
 
@@ -47,6 +59,11 @@ public enum OffscreenRenderer {
         public func dayHistory(collectedMinutes: Int? = nil) -> MinuteHistory {
             self == .pending ? MinuteHistory()
                              : SnapshotFixtures.dayHistory(collectedMinutes: collectedMinutes)
+        }
+
+        public var aiHistory: AIHistory {
+            if self == .aiSlots { return SnapshotFixtures.aiSlotHistory() }
+            return self == .aiMonitoring || self == .aiPrefill ? SnapshotFixtures.aiHistory() : AIHistory()
         }
     }
 
@@ -70,6 +87,16 @@ public enum OffscreenRenderer {
             self.isDark = isDark
             self.scale = scale
             self.settings = settings
+            if scenario == .aiMonitoring || scenario == .aiPrefill || scenario == .aiSlots {
+                self.settings.ai = AISettings(endpoints: SnapshotFixtures.aiEndpoints, isEnabled: true)
+                self.settings.panel.collapsedModules = Set(PanelModule.allCases).subtracting([.ai])
+                if !self.settings.menuBar.items.contains(where: { $0.metric == .ai }) {
+                    self.settings.menuBar.items.append(MenuBarItemConfig(metric: .ai, style: .text))
+                }
+                if !self.settings.desktopWidget.modules.contains(.ai) {
+                    self.settings.desktopWidget.modules.append(.ai)
+                }
+            }
             self.collectedMinutes = collectedMinutes
             self.withoutHistory = withoutHistory
         }
@@ -336,12 +363,14 @@ enum PreviewEngine {
         engine.loadFixture(snapshot: request.scenario.snapshot,
                            history: request.withoutHistory ? MetricHistory() : request.scenario.history,
                            dayHistory: request.withoutHistory ? MinuteHistory()
-                               : request.scenario.dayHistory(collectedMinutes: request.collectedMinutes))
+                               : request.scenario.dayHistory(collectedMinutes: request.collectedMinutes),
+                           aiHistory: request.withoutHistory ? AIHistory() : request.scenario.aiHistory)
         engineCache[key] = engine
         return engine
     }
 
     private static func cacheKey(_ request: OffscreenRenderer.Request) -> String {
-        "\(request.surface.rawValue)-\(request.scenario.rawValue)-\(request.isDark)-\(request.collectedMinutes ?? -1)-\(request.withoutHistory)"
+        let settings = (try? JSONEncoder().encode(request.settings))?.base64EncodedString() ?? ""
+        return "\(request.surface.rawValue)-\(request.scenario.rawValue)-\(request.isDark)-\(request.collectedMinutes ?? -1)-\(request.withoutHistory)-\(settings)"
     }
 }

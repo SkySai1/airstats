@@ -14,6 +14,10 @@ enum MenuBarItemLayout: Equatable {
     /// controller reports that explicit absence to its visibility callback.
     case hidden
 
+    init(settings: Settings) {
+        self.init(settings: MenuBarConfiguration.effective(settings))
+    }
+
     init(settings: MenuBarSettings) {
         guard settings.isVisible else {
             self = .hidden
@@ -112,7 +116,7 @@ public final class StatusItemController {
     /// whole run back in order, and anything the user has dragged elsewhere returns to
     /// where they dragged it from its autosaved position.
     private func syncLayout() {
-        let desired = MenuBarItemLayout(settings: settings.settings.menuBar)
+        let desired = MenuBarItemLayout(settings: settings.settings)
         guard desired != layout else { return }
         tearDownItems()
         layout = desired
@@ -130,7 +134,7 @@ public final class StatusItemController {
             // the ones already on the bar, so making the last readout first leaves the
             // first one leftmost and the configured order reads left to right. A
             // readout the user has since dragged somewhere else keeps that position.
-            let configs = settings.settings.menuBar.enabledItems
+            let configs = MenuBarConfiguration.effective(settings.settings).enabledItems
             let built = configs.reversed().compactMap { config in
                 makeItem(readout: config.id,
                          autosaveName: StatusItemController.autosaveName(for: config.id),

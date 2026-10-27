@@ -309,6 +309,8 @@ public struct MetricFormatter: Sendable {
             return "9999 RPM"
         case .uptime:
             return "999d"
+        case .ai:
+            return "999 generating"
         }
     }
 }

@@ -88,6 +88,7 @@ public enum MenuBarMetric: String, Sendable, Codable, CaseIterable, Equatable, H
     case battery, batteryTime, systemPower
     case fanSpeed
     case uptime
+    case ai
 
     public var label: String {
         switch self {
@@ -107,20 +108,7 @@ public enum MenuBarMetric: String, Sendable, Codable, CaseIterable, Equatable, H
         case .systemPower: return "System Power"
         case .fanSpeed: return "Fan Speed"
         case .uptime: return "Uptime"
-        }
-    }
-
-    /// Which collector must be running for this readout to have data.
-    public var requiredSource: CollectorID {
-        switch self {
-        case .cpuUsage, .cpuFrequency: return .cpu
-        case .cpuTemperature, .fanSpeed: return .thermal
-        case .memoryUsage, .memoryPressure: return .memory
-        case .gpuUsage: return .gpu
-        case .networkThroughput, .networkUpload, .networkDownload: return .network
-        case .diskActivity, .diskFree: return .disk
-        case .battery, .batteryTime, .systemPower: return .power
-        case .uptime: return .system
+        case .ai: return "AI"
         }
     }
 
@@ -146,8 +134,25 @@ public enum MenuBarMetric: String, Sendable, Codable, CaseIterable, Equatable, H
             // The readouts that are a fraction of a known ceiling, which is the only
             // thing a fill level can honestly draw.
             return MenuBarDisplayStyle.general + [.bar]
+        case .ai:
+            return [.text, .iconAndText]
         default:
             return MenuBarDisplayStyle.general
+        }
+    }
+
+    /// Which collector must be running for this readout to have data.
+    public var requiredSource: CollectorID {
+        switch self {
+        case .cpuUsage, .cpuFrequency: return .cpu
+        case .cpuTemperature, .fanSpeed: return .thermal
+        case .memoryUsage, .memoryPressure: return .memory
+        case .gpuUsage: return .gpu
+        case .networkThroughput, .networkUpload, .networkDownload: return .network
+        case .diskActivity, .diskFree: return .disk
+        case .battery, .batteryTime, .systemPower: return .power
+        case .uptime: return .system
+        case .ai: return .ai
         }
     }
 }
@@ -323,7 +328,7 @@ public struct MenuBarSettings: Sendable, Codable, Equatable {
 // MARK: - Panel
 
 public enum PanelModule: String, Sendable, Codable, CaseIterable, Equatable, Hashable {
-    case cpu, memory, gpu, network, disk, battery, thermal, processes, system
+    case cpu, memory, gpu, network, disk, battery, thermal, processes, system, ai
 
     public var label: String {
         switch self {
@@ -336,6 +341,7 @@ public enum PanelModule: String, Sendable, Codable, CaseIterable, Equatable, Has
         case .thermal: return "Temperature"
         case .processes: return "Top Processes"
         case .system: return "System"
+        case .ai: return "AI"
         }
     }
 
@@ -350,6 +356,7 @@ public enum PanelModule: String, Sendable, Codable, CaseIterable, Equatable, Has
         case .thermal: return .thermal
         case .processes: return .processes
         case .system: return .system
+        case .ai: return .ai
         }
     }
 
@@ -812,6 +819,120 @@ public struct ShortcutSettings: Sendable, Codable, Equatable {
     }
 }
 
+// MARK: - AI
+
+/// The log format used by one local inference server.
+public enum AIRuntime: String, Sendable, Codable, CaseIterable, Equatable, Hashable {
+    case ollama, llamaCpp
+
+    public var label: String { self == .ollama ? "Ollama" : "llama.cpp" }
+    public var defaultLogDirectory: String {
+        self == .ollama ? "~/.ollama/logs" : "~/.config/llama-server/logs"
+    }
+    public var defaultLogFilePattern: String { self == .ollama ? "server*.log" : "std*.log" }
+    public var defaultURL: String { self == .ollama ? "http://localhost:11434" : "http://localhost:8080" }
+}
+
+/// An inference instance with an optional live API and local log sources.
+public struct AIEndpoint: Sendable, Codable, Equatable, Hashable, Identifiable {
+    public var id: UUID
+    public var name: String
+    public var url: String
+    public var apiKey: String?
+    public var isEnabled: Bool
+    public var runtime: AIRuntime
+    public var logDirectory: String
+    /// A filename glob, including rotated files when their names match it.
+    public var logFilePattern: String
+    public var usesAPI: Bool
+
+    public init(id: UUID = UUID(),
+                name: String = "Ollama",
+                url: String? = nil,
+                apiKey: String? = nil,
+                isEnabled: Bool = true,
+                runtime: AIRuntime = .ollama,
+                logDirectory: String? = nil,
+                logFilePattern: String? = nil,
+                usesAPI: Bool = true) {
+        self.id = id
+        self.name = name
+        self.url = url ?? runtime.defaultURL
+        self.apiKey = apiKey
+        self.isEnabled = isEnabled
+        self.runtime = runtime
+        self.logDirectory = logDirectory ?? runtime.defaultLogDirectory
+        self.logFilePattern = logFilePattern ?? runtime.defaultLogFilePattern
+        self.usesAPI = usesAPI
+    }
+
+    public var apiBaseURL: URL? {
+        guard let components = URLComponents(string: url.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let scheme = components.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              let host = components.host, !host.isEmpty,
+              components.user == nil, components.password == nil,
+              components.query == nil, components.fragment == nil else { return nil }
+        return components.url
+    }
+
+    /// Paths need not exist yet: a server can create its log on the next launch.
+    public var isConfigured: Bool {
+        let directory = logDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pattern = logFilePattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        let expanded = (directory as NSString).expandingTildeInPath
+        return !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && expanded.hasPrefix("/")
+            && !directory.contains("\0")
+            && !pattern.isEmpty
+            && !pattern.contains("/")
+            && !pattern.contains("\0")
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, url, apiKey, isEnabled, runtime, logDirectory, logFilePattern, usesAPI
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.value(.id, or: UUID())
+        let storedName = c.value(.name, or: Optional<String>.none)
+        let storedURL = c.value(.url, or: Optional<String>.none)
+        apiKey = c.value(.apiKey, or: Optional<String>.none)
+        isEnabled = c.value(.isEnabled, or: true)
+        // Older settings identified the runtime only by the endpoint name or URL.
+        let legacyName = (storedName ?? "").lowercased()
+        let legacyRuntime: AIRuntime = (!legacyName.contains("ollama")
+            && (legacyName.contains("llama") || (storedURL ?? "").contains(":8080"))) ? .llamaCpp : .ollama
+        runtime = c.value(.runtime, or: legacyRuntime)
+        name = storedName ?? runtime.label
+        url = storedURL ?? runtime.defaultURL
+        logDirectory = c.value(.logDirectory, or: runtime.defaultLogDirectory)
+        logFilePattern = c.value(.logFilePattern, or: runtime.defaultLogFilePattern)
+        usesAPI = c.value(.usesAPI, or: true)
+    }
+}
+
+public struct AISettings: Sendable, Codable, Equatable {
+    public var endpoints: [AIEndpoint]
+    public var isEnabled: Bool
+
+    public init(endpoints: [AIEndpoint] = [], isEnabled: Bool = false) {
+        self.endpoints = endpoints
+        self.isEnabled = isEnabled
+    }
+
+    public var enabledEndpoints: [AIEndpoint] { endpoints.filter { $0.isEnabled && $0.isConfigured } }
+    public var isMonitoringEnabled: Bool { isEnabled && !enabledEndpoints.isEmpty }
+
+    private enum CodingKeys: String, CodingKey { case endpoints, isEnabled }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        endpoints = c.value(.endpoints, or: [])
+        isEnabled = c.value(.isEnabled, or: false)
+    }
+}
+
 // MARK: - General
 
 public struct GeneralSettings: Sendable, Codable, Equatable {
@@ -984,6 +1105,7 @@ public struct Settings: Sendable, Codable, Equatable {
     public var notifications: NotificationSettings
     public var shortcuts: ShortcutSettings
     public var theme: ThemeSettings
+    public var ai: AISettings
 
     public static let currentSchemaVersion = 1
 
@@ -995,7 +1117,8 @@ public struct Settings: Sendable, Codable, Equatable {
                 desktopWidget: DesktopWidgetSettings = .init(),
                 notifications: NotificationSettings = .init(),
                 shortcuts: ShortcutSettings = .init(),
-                theme: ThemeSettings = .init()) {
+                theme: ThemeSettings = .init(),
+                ai: AISettings = .init()) {
         self.schemaVersion = schemaVersion
         self.general = general
         self.menuBar = menuBar
@@ -1005,11 +1128,12 @@ public struct Settings: Sendable, Codable, Equatable {
         self.notifications = notifications
         self.shortcuts = shortcuts
         self.theme = theme
+        self.ai = ai
     }
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, general, menuBar, panel, charts, notifications
-        case shortcuts, theme
+        case shortcuts, theme, ai
         // Stored under the old name so an installed copy keeps its settings.
         case desktopWidget = "overlay"
     }
@@ -1025,6 +1149,7 @@ public struct Settings: Sendable, Codable, Equatable {
         notifications = c.value(.notifications, or: NotificationSettings())
         shortcuts = c.value(.shortcuts, or: ShortcutSettings())
         theme = c.value(.theme, or: ThemeSettings())
+        ai = c.value(.ai, or: AISettings())
     }
 
     /// Collectors that must run to satisfy everything currently on screen.
@@ -1033,12 +1158,18 @@ public struct Settings: Sendable, Codable, Equatable {
     /// wants a CPU readout never pays for IOKit battery or SMC sensor polling.
     public func requiredSources(panelVisible: Bool, desktopWidgetVisible: Bool) -> Set<CollectorID> {
         var sources = Set<CollectorID>()
-        for item in menuBar.enabledItems { sources.insert(item.metric.requiredSource) }
+        for item in menuBar.enabledItems where item.metric != .ai || ai.isMonitoringEnabled {
+            sources.insert(item.metric.requiredSource)
+        }
         if panelVisible {
-            for module in panel.visibleModules { sources.insert(module.requiredSource) }
+            for module in panel.visibleModules where module != .ai || ai.isMonitoringEnabled {
+                sources.insert(module.requiredSource)
+            }
         }
         if desktopWidgetVisible {
-            for module in desktopWidget.modules { sources.insert(module.requiredSource) }
+            for module in desktopWidget.modules where module != .ai || ai.isMonitoringEnabled {
+                sources.insert(module.requiredSource)
+            }
         }
         if notifications.isEnabled {
             for rule in notifications.enabledRules { sources.insert(rule.metric.requiredSource) }

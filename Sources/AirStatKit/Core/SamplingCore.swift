@@ -131,6 +131,7 @@ public final class SamplingCore: @unchecked Sendable {
     private let thermalSlot: SourceSlot<ThermalCollector>
     private let processSlot: SourceSlot<ProcessCollector>
     private let systemSlot: SourceSlot<SystemInfoCollector>
+    private let aiSlot: SourceSlot<AICollector>
 
     // MARK: Scheduling
 
@@ -150,6 +151,7 @@ public final class SamplingCore: @unchecked Sendable {
     private var activity: SamplingActivity = .menuBar
     private var enabledSources: Set<CollectorID> = Set(CollectorID.allCases)
     private var publicIPLookupEnabled = false
+    private var aiEndpoints: [AIEndpoint] = []
     private var pendingWakeFlag = false
     private var isRunning = false
     private var thermalCadenceMultiplier = 1.0
@@ -161,13 +163,16 @@ public final class SamplingCore: @unchecked Sendable {
         public let baseInterval: TimeInterval
         public let enabledSources: Set<CollectorID>
         public let publicIPLookupEnabled: Bool
+        public let aiEndpoints: [AIEndpoint]
 
         public init(baseInterval: TimeInterval,
                     enabledSources: Set<CollectorID>,
-                    publicIPLookupEnabled: Bool) {
+                    publicIPLookupEnabled: Bool,
+                    aiEndpoints: [AIEndpoint] = []) {
             self.baseInterval = baseInterval
             self.enabledSources = enabledSources
             self.publicIPLookupEnabled = publicIPLookupEnabled
+            self.aiEndpoints = aiEndpoints
         }
     }
 
@@ -185,6 +190,7 @@ public final class SamplingCore: @unchecked Sendable {
         self.thermalSlot = SourceSlot(ThermalCollector())
         self.processSlot = SourceSlot(ProcessCollector())
         self.systemSlot = SourceSlot(SystemInfoCollector())
+        self.aiSlot = SourceSlot(AICollector())
     }
 
     // MARK: Control
@@ -261,6 +267,18 @@ public final class SamplingCore: @unchecked Sendable {
         }
     }
 
+    /// Changes log sources on the same queue that owns the reader offsets.
+    public func setAIEndpoints(_ endpoints: [AIEndpoint]) {
+        queue.async { [self] in
+            guard aiEndpoints != endpoints else { return }
+            aiEndpoints = endpoints
+            aiSlot.source.setEndpoints(endpoints)
+            aiSlot.invalidateBaseline()
+            aiSlot.resetRetry()
+            if isRunning { sampleLocked() }
+        }
+    }
+
     /// Called on wake from sleep: cumulative counters may have reset and every
     /// rate is meaningless until re-baselined.
     public func noteWakeFromSleep() {
@@ -298,7 +316,7 @@ public final class SamplingCore: @unchecked Sendable {
     private func forEachSlot(_ body: (any SlotErasing) -> Void) {
         body(cpuSlot); body(memorySlot); body(gpuSlot); body(networkSlot)
         body(diskSlot); body(powerSlot); body(thermalSlot); body(processSlot)
-        body(systemSlot)
+        body(systemSlot); body(aiSlot)
     }
 
     private func rescheduleTimerLocked() {
@@ -323,10 +341,17 @@ public final class SamplingCore: @unchecked Sendable {
         let sourcesChanged = configuration.enabledSources != enabledSources
         let intervalChanged = clamped != baseInterval
         let publicIPChanged = configuration.publicIPLookupEnabled != publicIPLookupEnabled
+        let aiChanged = configuration.aiEndpoints != aiEndpoints
 
         baseInterval = clamped
         enabledSources = configuration.enabledSources
         publicIPLookupEnabled = configuration.publicIPLookupEnabled
+        if aiChanged {
+            aiEndpoints = configuration.aiEndpoints
+            aiSlot.source.setEndpoints(aiEndpoints)
+            aiSlot.invalidateBaseline()
+            aiSlot.resetRetry()
+        }
         forEachSlot { slot in
             if removed.contains(slot.identifier) { slot.suspend() }
         }
@@ -334,7 +359,7 @@ public final class SamplingCore: @unchecked Sendable {
             networkSlot.source.setPublicIPLookupEnabled(configuration.publicIPLookupEnabled)
         }
         if intervalChanged { rescheduleTimerLocked() }
-        if isRunning && (sourcesChanged || intervalChanged || publicIPChanged) { sampleLocked() }
+        if isRunning && (sourcesChanged || intervalChanged || publicIPChanged || aiChanged) { sampleLocked() }
     }
 
     private func sampleLocked(force: Bool = false) {
@@ -372,6 +397,8 @@ public final class SamplingCore: @unchecked Sendable {
             run(processSlot)
         }
 
+        run(aiSlot)
+
         guard changed else { return }
 
         let snapshot = SystemSnapshot(
@@ -385,6 +412,7 @@ public final class SamplingCore: @unchecked Sendable {
             processes: processSlot.state,
             processesSampled: processSlot.sampled(at: now),
             system: systemSlot.state,
+            ai: aiSlot.state,
             capturedAt: Date(),
             capturedInstant: now
         )

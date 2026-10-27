@@ -19,6 +19,7 @@ extension PanelModuleView {
         case .thermal:   thermalDetail
         case .processes: processesDetail
         case .system:    systemDetail
+        case .ai:        aiDetail
         }
     }
 
@@ -560,6 +561,16 @@ extension PanelModuleView {
                     PanelDetailEntry(system.osName, system.osVersion),
                 ])
             }
+        }
+    }
+
+    // MARK: AI
+
+    private var aiDetail: some View {
+        section(engine.ai) { snapshot in
+            AIInstanceMetricsView(snapshot: snapshot, history: engine.aiHistory,
+                                  isCompact: false,
+                                  tint: chartTint, usesMetricGrid: true)
         }
     }
 

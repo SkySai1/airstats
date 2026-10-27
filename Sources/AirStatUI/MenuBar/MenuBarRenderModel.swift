@@ -1,6 +1,18 @@
 import Foundation
 import AirStatKit
 
+/// Runtime availability changes presentation without overwriting the user's item
+/// identities, order or visibility choices in the settings file.
+enum MenuBarConfiguration {
+    static func effective(_ settings: Settings) -> MenuBarSettings {
+        var menuBar = settings.menuBar
+        if !settings.ai.isMonitoringEnabled {
+            menuBar.items.removeAll { $0.metric == .ai }
+        }
+        return menuBar
+    }
+}
+
 /// One value of a readout: the number, the widest string it can ever become, and the
 /// series behind it.
 ///
@@ -167,7 +179,7 @@ public struct MenuBarRenderModel: Equatable, Sendable {
 
         var rendered: [MenuBarItemRender] = []
         rendered.reserveCapacity(settings.menuBar.items.count)
-        for config in settings.menuBar.enabledItems {
+        for config in MenuBarConfiguration.effective(settings).enabledItems {
             rendered.append(MenuBarRenderModel.render(config: config,
                                                       snapshot: snapshot,
                                                       history: history,
@@ -391,6 +403,20 @@ public struct MenuBarRenderModel: Equatable, Sendable {
                 unavailable = false
                 accessibilityValue = "Uptime \(valueText)"
             }
+        case .ai:
+            if let ai = snapshot.ai.value {
+                valueText = AIReadoutSummary.value(ai)
+                unavailable = false
+                accessibilityValue = "AI \(valueText). " + ai.instances.map { instance in
+                    "\(instance.name): " + (instance.models.isEmpty ? "No observed models" :
+                        instance.models.map {
+                            "\($0.name), loaded \(AIReadoutSummary.loaded($0, apiStatus: instance.apiStatus)), "
+                            + AIReadoutSummary.activity($0, status: instance.status, apiStatus: instance.apiStatus,
+                                                        now: ai.capturedAt)
+                        }
+                            .joined(separator: ", "))
+                }.joined(separator: ". ")
+            }
         }
 
         let series = seriesKey.map { normalizedSeries(history, key: $0) } ?? []
@@ -463,6 +489,7 @@ public struct MenuBarRenderModel: Equatable, Sendable {
     public static func sideCaptionText(for metric: MenuBarMetric) -> String? {
         switch metric {
         case .memoryPressure: return "PRS"
+        case .ai: return "AI"
         default: return captionText(for: metric)
         }
     }
@@ -487,6 +514,7 @@ public struct MenuBarRenderModel: Equatable, Sendable {
         case .systemPower: return "PWR"
         case .fanSpeed: return "FAN"
         case .uptime: return "UP"
+        case .ai: return "AI"
         }
     }
 
@@ -585,6 +613,7 @@ public struct MenuBarRenderModel: Equatable, Sendable {
         case .systemPower: return "bolt"
         case .fanSpeed: return "fan"
         case .uptime: return "clock"
+        case .ai: return "brain"
         }
     }
 }

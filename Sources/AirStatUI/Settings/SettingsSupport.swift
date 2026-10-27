@@ -20,6 +20,7 @@ public enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
     case general
     case menuBar, desktopWidget, notifications
     case appearance, shortcuts
+    case ai
     case about
 
     public var id: String { rawValue }
@@ -32,6 +33,7 @@ public enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         case .desktopWidget: return "Desktop Widget"
         case .notifications: return "Notifications"
         case .shortcuts: return "Shortcuts"
+        case .ai: return "AI"
         case .about: return "About"
         }
     }
@@ -55,6 +57,7 @@ public enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         case .desktopWidget: return "macwindow.on.rectangle"
         case .notifications: return "bell.badge"
         case .shortcuts: return "keyboard"
+        case .ai: return "brain"
         case .about: return "info.circle"
         }
     }
@@ -69,6 +72,7 @@ public enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         case .desktopWidget: return [.desktopWidget]
         case .notifications: return [.notifications]
         case .shortcuts: return [.shortcuts]
+        case .ai: return [.ai]
         case .about: return []
         }
     }
@@ -208,6 +212,7 @@ struct MetricAvailability {
         case .thermal: state = snapshot.thermal.failure
         case .processes: state = snapshot.processes.failure
         case .system: state = snapshot.system.failure
+        case .ai: state = snapshot.ai.failure
         }
         guard let state, state.isPermanent else { return nil }
         return state.message

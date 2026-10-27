@@ -250,6 +250,11 @@ extension PanelSummary {
         case .system:
             guard let system = engine.system.value else { return PanelSummary() }
             return PanelSummary(value: formatter.uptime(system.uptime), caption: "uptime")
+        case .ai:
+            guard let ai = engine.ai.value else { return PanelSummary() }
+            return PanelSummary(value: AIReadoutSummary.value(ai),
+                                caption: "\(ai.instances.count) instances",
+                                emphasis: .state)
         }
     }
 

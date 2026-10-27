@@ -31,6 +31,10 @@ public enum Design {
         public static let rowGap: CGFloat = 12
     }
 
+    public enum Settings {
+        public static let instanceEditorWidth: CGFloat = 480
+    }
+
     // MARK: - Typography
 
     /// Type scale built from `NSFont` system faces so it tracks the user's Dynamic
@@ -110,6 +114,7 @@ public enum Design {
             case .thermal: return Color(nsColor: .systemOrange)
             case .processes: return Color(nsColor: .systemGray)
             case .system: return Color(nsColor: .systemGray)
+            case .ai: return Color(nsColor: .systemPink)
             }
         }
 

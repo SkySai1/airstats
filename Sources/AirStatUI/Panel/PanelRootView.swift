@@ -108,7 +108,15 @@ public struct PanelRootView: View {
 
     @Environment(\.panelActions) private var actions
 
-    private var modules: [PanelModule] { settings.settings.panel.visibleModules }
+    private var modules: [PanelModule] {
+        var modules = settings.settings.panel.visibleModules.filter {
+            $0 != .ai || settings.settings.ai.isMonitoringEnabled
+        }
+        if settings.settings.ai.isMonitoringEnabled && !modules.contains(.ai) {
+            modules.append(.ai)
+        }
+        return modules
+    }
 
     /// One width for every row's qualifier column, from the captions on screen now.
     private var captionColumnWidth: CGFloat {

@@ -3,7 +3,7 @@ import Foundation
 /// Stable identity for each metric source. Used for scheduling, for the
 /// "which modules are enabled" set, and for diagnostics.
 public enum CollectorID: String, Sendable, Equatable, Hashable, CaseIterable, Codable {
-    case cpu, memory, gpu, network, disk, power, thermal, processes, system
+    case cpu, memory, gpu, network, disk, power, thermal, processes, system, ai
 
     public var label: String {
         switch self {
@@ -16,6 +16,7 @@ public enum CollectorID: String, Sendable, Equatable, Hashable, CaseIterable, Co
         case .thermal: return "Temperature"
         case .processes: return "Processes"
         case .system: return "System"
+        case .ai: return "AI"
         }
     }
 
@@ -30,6 +31,7 @@ public enum CollectorID: String, Sendable, Equatable, Hashable, CaseIterable, Co
         case .thermal: return "thermometer.medium"
         case .processes: return "list.bullet.rectangle"
         case .system: return "desktopcomputer"
+        case .ai: return "brain"
         }
     }
 }

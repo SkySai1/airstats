@@ -20,6 +20,9 @@ public final class MetricsEngine {
     /// `setSuspensionReason`.
     public private(set) var dayHistory = MinuteHistory()
 
+    /// Request timings and measured process memory are isolated by instance identity.
+    public private(set) var aiHistory = AIHistory()
+
     public private(set) var activity: SamplingActivity = .menuBar
 
     /// Wall-clock time of the last snapshot, for the "updated Xs ago" affordance.
@@ -66,6 +69,7 @@ public final class MetricsEngine {
     private var powerStateObserver: NSObjectProtocol?
     private var thermalStateObserver: NSObjectProtocol?
     private var settingsApplyTask: Task<Void, Never>?
+    private var aiHistoryEndpoints: [UUID: AIEndpoint] = [:]
     public init(settingsStore: SettingsStore) {
         self.settingsStore = settingsStore
         let s = settingsStore.settings
@@ -224,8 +228,10 @@ public final class MetricsEngine {
     }
 
     private var currentRequiredSources: Set<CollectorID> {
-        settingsStore.settings.requiredSources(panelVisible: isPanelVisible,
-                                               desktopWidgetVisible: isDesktopWidgetVisible)
+        var sources = settingsStore.settings.requiredSources(panelVisible: isPanelVisible,
+                                                             desktopWidgetVisible: isDesktopWidgetVisible)
+        if settingsStore.settings.ai.isMonitoringEnabled { sources.insert(.ai) }
+        return sources
     }
 
     // MARK: Settings
@@ -322,9 +328,21 @@ public final class MetricsEngine {
     /// picker, because a drag runs this at display rate.
     func applySettings() {
         let s = settingsStore.settings
+        let aiEndpoints = s.ai.isMonitoringEnabled ? s.ai.enabledEndpoints : []
+        let retainedAIIDs = Set(aiEndpoints.compactMap { endpoint -> UUID? in
+            guard let previous = aiHistoryEndpoints[endpoint.id],
+                  previous.runtime == endpoint.runtime,
+                  previous.url == endpoint.url,
+                  previous.logDirectory == endpoint.logDirectory,
+                  previous.logFilePattern == endpoint.logFilePattern else { return nil }
+            return endpoint.id
+        })
+        aiHistory.retainInstances(retainedAIIDs)
+        aiHistoryEndpoints = Dictionary(aiEndpoints.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
         core?.apply(.init(baseInterval: s.general.updateInterval,
                           enabledSources: currentRequiredSources,
-                          publicIPLookupEnabled: s.general.fetchesPublicIP))
+                          publicIPLookupEnabled: s.general.fetchesPublicIP,
+                          aiEndpoints: aiEndpoints))
         // Turning the pause off has to resume sampling now, not at whatever UI
         // transition happens to call `updateActivity` next.
         updateActivity()
@@ -360,6 +378,10 @@ public final class MetricsEngine {
     }
 
     private func record(_ s: SystemSnapshot) {
+        if settingsStore.settings.ai.isMonitoringEnabled, let ai = s.ai.value {
+            aiHistory.append(ai)
+            aiHistory.retainInstances(Set(settingsStore.settings.ai.enabledEndpoints.map(\.id)))
+        }
         history.markSampleDate(s.capturedAt)
         dayHistory.advance(to: s.capturedAt)
         if let newest = dayHistory.newestMinute, newest - (dayHistorySavedMinute ?? newest) >= 60 {
@@ -456,10 +478,12 @@ public final class MetricsEngine {
     /// binary and is how the UI gets reviewed, and a fixture path that only exists in
     /// debug builds cannot verify what release builds actually draw.
     public func loadFixture(snapshot: SystemSnapshot, history: MetricHistory,
-                            dayHistory: MinuteHistory = MinuteHistory()) {
+                            dayHistory: MinuteHistory = MinuteHistory(),
+                            aiHistory: AIHistory = AIHistory()) {
         self.snapshot = snapshot
         self.history = history
         self.dayHistory = dayHistory
+        self.aiHistory = aiHistory
         self.lastUpdate = snapshot.capturedAt
     }
 
@@ -474,4 +498,5 @@ public final class MetricsEngine {
     public var thermal: MetricState<ThermalSnapshot> { snapshot.thermal }
     public var processes: MetricState<ProcessSnapshot> { snapshot.processes }
     public var system: MetricState<SystemInfoSnapshot> { snapshot.system }
+    public var ai: MetricState<AISnapshot> { snapshot.ai }
 }

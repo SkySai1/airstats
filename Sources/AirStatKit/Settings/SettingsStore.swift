@@ -75,6 +75,14 @@ public final class SettingsStore {
     public func update(_ mutate: (inout Settings) -> Void) {
         var copy = settings
         mutate(&copy)
+        if !settings.ai.isMonitoringEnabled && copy.ai.isMonitoringEnabled {
+            if !copy.menuBar.items.contains(where: { $0.metric == .ai }) {
+                copy.menuBar.items.append(MenuBarItemConfig(metric: .ai, style: .iconAndText))
+            }
+            if !copy.desktopWidget.modules.contains(.ai) {
+                copy.desktopWidget.modules.append(.ai)
+            }
+        }
         settings = SettingsStore.sanitize(copy)
     }
 
@@ -93,12 +101,13 @@ public final class SettingsStore {
             case .notifications: s.notifications = NotificationSettings()
             case .shortcuts: s.shortcuts = ShortcutSettings()
             case .theme: s.theme = ThemeSettings()
+            case .ai: s.ai = AISettings()
             }
         }
     }
 
     public enum SettingsSection: String, Sendable, CaseIterable {
-        case general, menuBar, charts, desktopWidget, notifications, shortcuts, theme
+        case general, menuBar, charts, desktopWidget, notifications, shortcuts, theme, ai
 
         /// What this subtree is called in the window. Here rather than in the UI layer
         /// because the reset menu lists sections, not panes — one pane now edits more
@@ -112,6 +121,7 @@ public final class SettingsStore {
             case .notifications: return "Notifications"
             case .shortcuts: return "Shortcuts"
             case .theme: return "Colors"
+            case .ai: return "AI"
             }
         }
     }
@@ -128,7 +138,7 @@ public final class SettingsStore {
     /// the data is not decodable at all; individual bad keys fall back to defaults.
     public func importJSON(_ data: Data) throws {
         let decoded = try JSONDecoder().decode(Settings.self, from: data)
-        settings = SettingsStore.sanitize(decoded)
+        update { $0 = decoded }
         flush()
     }
 

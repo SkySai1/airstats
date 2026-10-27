@@ -12,15 +12,20 @@ public enum MetricProbe {
         public var repeatCount: Int
         public var interval: TimeInterval
         public var verbose: Bool
+        /// Explicit API/log instances, or the runtime defaults when omitted.
+        public var aiEndpoints: [AIEndpoint]
 
         public init(collectors: Set<CollectorID> = Set(CollectorID.allCases),
                     repeatCount: Int = 2,
                     interval: TimeInterval = 1,
-                    verbose: Bool = false) {
+                    verbose: Bool = false,
+                    aiEndpoints: [AIEndpoint] = [AIEndpoint(name: "Ollama", runtime: .ollama),
+                                                 AIEndpoint(name: "llama.cpp", runtime: .llamaCpp)]) {
             self.collectors = collectors
             self.repeatCount = max(1, repeatCount)
             self.interval = max(0.05, interval)
             self.verbose = verbose
+            self.aiEndpoints = aiEndpoints
         }
     }
 
@@ -42,6 +47,8 @@ public enum MetricProbe {
         let thermal = ThermalCollector()
         let processes = ProcessCollector()
         let system = SystemInfoCollector()
+        let ai = AICollector()
+        ai.setEndpoints(options.aiEndpoints)
 
         var started: [CollectorID] = []
         func startIfNeeded<S: MetricSource>(_ source: S) {
@@ -52,6 +59,7 @@ public enum MetricProbe {
         startIfNeeded(cpu); startIfNeeded(memory); startIfNeeded(gpu)
         startIfNeeded(network); startIfNeeded(disk); startIfNeeded(power)
         startIfNeeded(thermal); startIfNeeded(processes); startIfNeeded(system)
+        startIfNeeded(ai)
 
         emit("AirStats metric probe")
         emit("collectors: \(options.collectors.map(\.rawValue).sorted().joined(separator: ", "))")
@@ -98,10 +106,12 @@ public enum MetricProbe {
             sample(power, describe: describePower)
             sample(thermal, describe: describeThermal)
             sample(processes, describe: describeProcesses)
+            sample(ai, describe: describeAI)
         }
 
         cpu.stop(); memory.stop(); gpu.stop(); network.stop(); disk.stop()
         power.stop(); thermal.stop(); processes.stop(); system.stop()
+        ai.stop()
 
         emit()
         emit(String(repeating: "─", count: 68))
@@ -279,5 +289,48 @@ public enum MetricProbe {
                                        process.name))
         }
         return lines
+    }
+
+    private static func describeAI(_ snapshot: AISnapshot) -> [String] {
+        if snapshot.instances.isEmpty { return ["no log sources configured"] }
+        return snapshot.instances.flatMap { instance -> [String] in
+            var lines = ["\(instance.name) [\(instance.runtime.label)]  \(instance.status.message)"]
+            lines.append("  API         \(instance.apiStatus.message)")
+            if let date = instance.apiFetchedAt { lines.append("  API success \(date)") }
+            if let date = instance.lastEventAt { lines.append("  last event  \(date)") }
+            lines.append("  memory      \(instance.memoryBytes.map { fmt.memory($0) } ?? "—") (process RSS)")
+            lines.append("  processes   \(instance.processMemoryStatus.message)")
+            for process in instance.processes {
+                let footprint = process.physicalFootprintBytes.map { fmt.memory($0) } ?? "—"
+                lines.append("  PID \(process.pid)  RSS=\(fmt.memory(process.residentBytes))  physical-footprint=\(footprint)")
+            }
+            for model in instance.models {
+                let active = model.isActive.map { $0 ? "generating" : "idle" } ?? "activity unknown"
+                let loaded = model.isLoaded.map { $0 ? "loaded" : "unloaded" } ?? "load state unknown"
+                let context = model.contextWindowUsed.map(String.init) ?? "—"
+                let total = model.contextWindowTotal.map(String.init) ?? "—"
+                let generation = model.tokensPerSecond.map { String(format: "%.2f tok/s", $0) } ?? "—"
+                let prefill = model.contextTokensPerSecond.map { String(format: "%.2f tok/s", $0) } ?? "—"
+                lines.append("  model       \(model.name) (\(loaded), \(active))")
+                lines.append("  context     \(context) / \(total) tokens  generation=\(generation)  prefill=\(prefill)")
+                for slot in model.slots {
+                    let task = slot.taskID.map(String.init) ?? "—"
+                    let answer = slot.tokensPerSecond.map { String(format: "%.2f", $0) } ?? "—"
+                    let prefill = slot.contextTokensPerSecond.map { String(format: "%.2f", $0) } ?? "—"
+                    let used = slot.contextWindowUsed.map(String.init) ?? "—"
+                    let capacity = slot.contextWindowTotal.map(String.init) ?? "—"
+                    lines.append("  slot \(slot.id)      \(slot.phase.label)  task=\(task)  context=\(used)/\(capacity)  answer=\(answer) tok/s  prefill=\(prefill) tok/s")
+                }
+                for progress in model.prefillProgress {
+                    let slot = progress.slotID.map { " slot=\($0)" } ?? ""
+                    let task = progress.taskID.map { " task=\($0)" } ?? ""
+                    let elapsed = progress.elapsed.map { fmt.fixed($0, decimals: 2) + "s" } ?? "—"
+                    let rate = progress.tokensPerSecond.map { fmt.fixed($0, decimals: 2) + " tok/s" } ?? "—"
+                    lines.append("  reading     \(fmt.percent(progress.fraction))  \(progress.processedTokens) tokens\(slot)\(task)  elapsed=\(elapsed)  rate=\(rate)")
+                }
+            }
+            lines.append("  new metrics \(instance.observations.count)")
+            return lines
+        }
     }
 }

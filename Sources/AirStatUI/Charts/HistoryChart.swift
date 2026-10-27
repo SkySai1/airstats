@@ -747,6 +747,7 @@ extension PanelModule {
         case .battery: return ModuleHistory(.batteryPercent, shading: .batteryPlugged)
         case .thermal: return ModuleHistory(.cpuTemperature, domain: 30...100)
         case .processes, .system: return nil
+        case .ai: return nil
         }
     }
 }

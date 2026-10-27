@@ -43,11 +43,14 @@ enum DiagnosticsCLI {
       --repeat N      number of samples (default 2; rate metrics need at least 2)
       --interval S    seconds between samples (default 1)
       --verbose       print every sample, not just the last
+      --logs-only     inspect AI logs without querying runtime APIs
+      --ollama-url U  override the Ollama API base URL for this probe
+      --llama-url U   override the llama.cpp API base URL for this probe
 
     Render surfaces:  menuBar, panel, desktopWidget, settings   (omit for all)
     Render flags:
       --out DIR       output directory (default ./render)
-      --scenario S    nominal | underLoad | charging | degraded | pending  (omit for all)
+      --scenario S    nominal | underLoad | charging | degraded | pending | aiMonitoring | aiPrefill | aiSlots
       --light / --dark   appearance (omit for both)
       --scale N       backing scale, repeatable (omit for 1 and 2)
       --tint C        metric colour as #RRGGBB or r,g,b; the panel stays monochrome
@@ -63,6 +66,8 @@ enum DiagnosticsCLI {
         var repeatCount = 2
         var interval: TimeInterval = 1
         var verbose = false
+        var logsOnly = false
+        var aiURLs: [AIRuntime: String] = [:]
 
         var index = 0
         while index < arguments.count {
@@ -76,6 +81,16 @@ enum DiagnosticsCLI {
                 interval = Double(arguments[safe: index] ?? "") ?? interval
             case "--verbose":
                 verbose = true
+            case "--logs-only":
+                logsOnly = true
+            case "--ollama-url", "--llama-url":
+                let runtime: AIRuntime = argument == "--ollama-url" ? .ollama : .llamaCpp
+                index += 1
+                guard let value = arguments[safe: index], AIEndpoint(url: value).apiBaseURL != nil else {
+                    FileHandle.standardError.write(Data("\(argument) wants an HTTP or HTTPS base URL\n".utf8))
+                    exit(2)
+                }
+                aiURLs[runtime] = value
             default:
                 if let id = CollectorID(rawValue: argument) {
                     collectors.insert(id)
@@ -88,12 +103,18 @@ enum DiagnosticsCLI {
             index += 1
         }
 
-        let options = MetricProbe.Options(
+        var options = MetricProbe.Options(
             collectors: collectors.isEmpty ? Set(CollectorID.allCases) : collectors,
             repeatCount: repeatCount,
             interval: interval,
             verbose: verbose
         )
+        options.aiEndpoints = options.aiEndpoints.map { endpoint in
+            var endpoint = endpoint
+            if logsOnly { endpoint.usesAPI = false }
+            if let url = aiURLs[endpoint.runtime] { endpoint.url = url }
+            return endpoint
+        }
         print(MetricProbe.run(options))
     }
 }
