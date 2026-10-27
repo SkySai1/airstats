@@ -91,6 +91,10 @@ digests. An API error leaves log collection running; API and log problems appear
 as a warning icon beside the instance name, with details on hover. A loaded model
 is distinguished from a model currently generating a response.
 
+For Ollama, the public model tag reported during loading links API inventory to
+the GGUF paths in logs and process arguments. The scheduler's loaded-runner count
+reconciles model reloads so obsolete log states do not hide current measurements.
+
 Each instance has its own models, context size and last reported usage, generation
 and prefill speeds, and measured process memory. The panel uses the same column
 layout as Memory for supporting metrics. Charts aggregate generation

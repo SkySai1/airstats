@@ -100,6 +100,12 @@ identity. Log collection continues when an API is unavailable. Status and freshn
 are tracked separately for both sources. `isLoaded` and `isActive` are distinct:
 a loaded model may be idle.
 
+Ollama's API manifest digest and its GGUF blob digest identify different objects.
+Link the public tag from an observed load's `template selection` event to its GGUF
+path; strip only the explicit default registry/library prefixes. A `loaded runners`
+count of one retires previous unlabelled runner states, while multiple loaded
+runners must keep unlabelled timing output ambiguous.
+
 `AIPrefillProgress` tracks prompt reading separately for each slot and task. Its
 fraction comes directly from the runtime's `progress` field, not from context-window
 occupancy. Keep processed tokens, elapsed time, and reading speed as reported; do

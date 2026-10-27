@@ -32,6 +32,7 @@ struct AILogParser {
     private var states: [String: ModelState] = [:]
     private var currentKey: String?
     private var nextLoad = 0
+    private var pendingOllamaLoad: String?
     private var routerPorts: [String: String] = [:]
     private var hasRouterInventory = false
     private(set) var lastEventAt: Date?
@@ -51,6 +52,7 @@ struct AILogParser {
             // The skipped middle may contain an exit or a switch to another model.
             states = states.filter { !$0.value.sourceIdentities.contains(source) }
             if let currentKey, states[currentKey] == nil { self.currentKey = nil }
+            if let pendingOllamaLoad, states[pendingOllamaLoad] == nil { self.pendingOllamaLoad = nil }
         }
         if lower.contains("starting server in router mode") {
             hasRouterInventory = true
@@ -68,6 +70,7 @@ struct AILogParser {
             // A daemon restart invalidates loaded models from earlier rotations.
             states.removeAll(keepingCapacity: true)
             currentKey = nil
+            pendingOllamaLoad = nil
             lastEventAt = max(lastEventAt ?? record.date, record.date)
             return
         }
@@ -75,6 +78,32 @@ struct AILogParser {
             ?? Self.capture(#"\bpid[=:]\s*(\d+)"#, line)
             ?? Self.capture(#"^\[(\d+)\]\s"#, line)
         let namedModel = Self.capture(#"\bmodel[=:]\s*[\"']?([^\s\"',]+)"#, line)
+        if lower.contains("msg=\"template selection\""), let reference = namedModel,
+           let pendingOllamaLoad, var pending = states[pendingOllamaLoad] {
+            // Ollama reports the public tag separately from the GGUF path during
+            // this load. /api/ps exposes a manifest digest, not that GGUF's digest.
+            pending.info.aliases.formUnion(Self.ollamaAliases(reference))
+            states[pendingOllamaLoad] = pending
+            return
+        }
+        if lower.contains("msg=\"loaded runners\""),
+           let count = Self.integer(#"\bcount=(\d+)\b"#, line) {
+            if count == 0 {
+                states.removeAll()
+                currentKey = nil
+            } else if let pendingOllamaLoad, var loaded = states[pendingOllamaLoad] {
+                loaded.loading = false
+                if count == 1 {
+                    // The scheduler explicitly confirms a single loaded runner;
+                    // old unlabelled states must not make its live output ambiguous.
+                    states = [pendingOllamaLoad: loaded]
+                } else { states[pendingOllamaLoad] = loaded }
+                currentKey = pendingOllamaLoad
+            }
+            pendingOllamaLoad = nil
+            lastEventAt = max(lastEventAt ?? record.date, record.date)
+            return
+        }
         if lower.contains("msg=\"loading model via llama-server\""),
            let reference = namedModel, let currentKey, var pending = states[currentKey], pending.loading,
            pending.info.name == "Model name unavailable" || runner.map({ "runner:" + $0 }) == currentKey {
@@ -85,7 +114,9 @@ struct AILogParser {
         }
         let attributedKey = runner.map { "runner:" + $0 }
             ?? namedModel.map { name in states.first(where: { $0.value.info.name == name })?.key ?? "model:" + name }
-        let loadedPath = Self.capture(#"(?:load_model: loading model|model path\s*=)\s*['\"]([^'\"]+)"#, line)
+        let commandPath = lower.contains("msg=\"starting llama-server\"")
+            ? Self.capture(#"\s--model(?:=|\s+)([^\s\"\\]+)"#, line) : nil
+        let loadedPath = Self.capture(#"(?:load_model: loading model|model path\s*=)\s*['\"]([^'\"]+)"#, line) ?? commandPath
         let starting = lower.contains("starting llama-server") || lower.contains("starting llama server")
             || lower.contains("starting runner") || lower.contains("load_model: loading model")
         if starting {
@@ -100,6 +131,7 @@ struct AILogParser {
                 states[key] = newState(key: key, name: "Model name unavailable", reference: loadedPath ?? namedModel)
             }
             currentKey = key
+            if lower.contains("msg=\"starting llama-server\"") { pendingOllamaLoad = key }
         }
         let exiting = lower.contains("exit command received") || lower.contains("stopping model instance")
             || lower.contains("shutting down") || lower.contains("unloading model")
@@ -116,6 +148,7 @@ struct AILogParser {
                 }
             } else { states.removeAll() }
             if let currentKey, states[currentKey] == nil { self.currentKey = states.keys.sorted().first }
+            if let pendingOllamaLoad, states[pendingOllamaLoad] == nil { self.pendingOllamaLoad = nil }
             lastEventAt = max(lastEventAt ?? record.date, record.date)
             return
         }
@@ -515,6 +548,19 @@ struct AILogParser {
         }
         if let digest = capture(#"(?:^|/)sha256[-:]([0-9a-f]{64})$"#, path)?.lowercased() {
             aliases.formUnion([digest, "sha256-" + digest, "sha256:" + digest])
+        }
+        return aliases
+    }
+
+    private static func ollamaAliases(_ name: String) -> Set<String> {
+        var aliases: Set<String> = [name]
+        let registry = "registry.ollama.ai/"
+        if name.hasPrefix(registry) {
+            let qualified = String(name.dropFirst(registry.count))
+            aliases.insert(qualified)
+            if qualified.hasPrefix("library/") {
+                aliases.insert(String(qualified.dropFirst("library/".count)))
+            }
         }
         return aliases
     }
