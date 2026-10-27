@@ -73,6 +73,16 @@ struct SettingsDecodingTests {
         #expect(panel.collapsedModules == Set(PanelModule.allCases))
     }
 
+    @Test("missing or malformed remembered instances preserve other panel settings", arguments: [
+        #"{"panel":{"showsHistoryChart":false}}"#,
+        #"{"panel":{"showsHistoryChart":false,"selectedAIInstanceID":"invalid"}}"#,
+    ])
+    func panelInstanceDecodesLeniently(_ json: String) throws {
+        let panel = try decode(json).panel
+        #expect(panel.selectedAIInstanceID == nil)
+        #expect(!panel.showsHistoryChart)
+    }
+
     /// A file saved before the accordion can hold several open modules. The first in
     /// panel order stays open rather than all of them closing, so an upgrade does not
     /// hand back a panel that has forgotten what the user was looking at.
@@ -250,6 +260,26 @@ struct AISettingsTests {
         #expect(restored.ai.endpoints[0].name == "Ollama")
         #expect(restored.ai.endpoints[1].name == "Llama")
         #expect(restored.ai.endpoints[1].apiKey == "key")
+    }
+
+    @MainActor
+    @Test("the panel restores its last instance after reopening the settings store")
+    func panelInstancePersists() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = SettingsStore(directory: directory, saveDebounce: .seconds(3600))
+        let endpoints = [AIEndpoint(name: "First"), AIEndpoint(name: "Last viewed")]
+        store.update {
+            $0.ai = AISettings(endpoints: endpoints, isEnabled: true)
+            $0.panel.selectedAIInstanceID = endpoints[1].id
+        }
+        store.flush()
+
+        let restored = SettingsStore(directory: directory)
+        #expect(restored.loadDiagnostic == nil)
+        #expect(restored.settings.panel.selectedAIInstanceID == endpoints[1].id)
+        #expect(restored.settings.ai.endpoints == endpoints)
     }
 
     @Test("malformed AI settings fall back gracefully")

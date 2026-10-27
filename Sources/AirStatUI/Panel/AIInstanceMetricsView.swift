@@ -33,6 +33,12 @@ enum AIReadoutSummary {
         return snapshot.instances.isEmpty ? "No instances" : "No models"
     }
 
+    static func instanceSelection(_ selection: UUID?, in snapshot: AISnapshot,
+                                  allowsAllInstances: Bool) -> UUID? {
+        if let selection, snapshot.instances.contains(where: { $0.id == selection }) { return selection }
+        return allowsAllInstances ? nil : snapshot.instances.first?.id
+    }
+
     static func slotSelection(_ selection: AISlotSelection?, in instance: AIInstanceSnapshot) -> AISlotSelection? {
         guard let selection, instance.models.contains(where: { model in
             model.historyID == selection.modelID && model.slots.contains { $0.id == selection.slotID }
@@ -164,6 +170,8 @@ struct AIInstanceMetricsView: View {
     let isCompact: Bool
     let tint: Color
     var usesMetricGrid = false
+    var allowsAllInstances = true
+    var rememberedInstanceID: Binding<UUID?> = .constant(nil)
 
     @State private var interval: AIHistoryInterval = .oneMinute
     @State private var selectedInstanceID: UUID?
@@ -171,7 +179,10 @@ struct AIInstanceMetricsView: View {
     @Environment(\.metricFormatter) private var formatter
 
     var body: some View {
-        let selectedInstance = snapshot.instances.first { $0.id == selectedInstanceID }
+        let requestedID = allowsAllInstances ? selectedInstanceID : rememberedInstanceID.wrappedValue
+        let selection = AIReadoutSummary.instanceSelection(requestedID, in: snapshot,
+                                                           allowsAllInstances: allowsAllInstances)
+        let selectedInstance = snapshot.instances.first { $0.id == selection }
         return VStack(alignment: .leading, spacing: Design.Space.m) {
             if snapshot.instances.isEmpty {
                 Text("Configure an Ollama or llama.cpp instance in Settings → AI.")
@@ -204,6 +215,11 @@ struct AIInstanceMetricsView: View {
                 }
             }
         }
+        .onChange(of: selection, initial: true) { _, id in
+            if !allowsAllInstances, let id, rememberedInstanceID.wrappedValue != id {
+                rememberedInstanceID.wrappedValue = id
+            }
+        }
     }
 
     private func instancePicker(selection: UUID?) -> some View {
@@ -211,8 +227,16 @@ struct AIInstanceMetricsView: View {
             Text("Instance").font(Design.Text.caption).foregroundStyle(Design.Palette.secondaryText)
             Spacer(minLength: 0)
             Picker("Instance", selection: Binding<UUID?>(
-                get: { selection }, set: { selectedInstanceID = $0 })) {
-                Text("All instances").tag(Optional<UUID>.none)
+                get: { selection }, set: { id in
+                    if allowsAllInstances {
+                        selectedInstanceID = id
+                    } else if let id {
+                        rememberedInstanceID.wrappedValue = id
+                    }
+                })) {
+                if allowsAllInstances {
+                    Text("All instances").tag(Optional<UUID>.none)
+                }
                 ForEach(snapshot.instances) { instance in
                     Text(instance.name).tag(Optional(instance.id))
                 }

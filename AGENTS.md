@@ -123,10 +123,13 @@ aliases. Token observations carry that model identity, slot ID and task ID.
 measurement may appear in All slots, never in an arbitrarily selected slot.
 The panel and widget's Slot picker filters readouts and both token histories;
 memory remains at the model/instance level and is never divided between slots.
-Their Instance picker displays all instances or one stable instance UUID. Retain
-slot selections by instance UUID while switching. Removing the selected instance
-falls back to All instances. Presentation choices must not stop collection or erase
-the other instances' history.
+The panel's Instance picker always displays one instance, without an All instances
+option. Persist the last viewed instance UUID in panel settings across openings and
+app restarts; use the first available instance if that UUID is absent. An empty
+snapshot must not erase the saved choice. The widget supports All instances or one
+instance and falls back to All instances when its selected instance is removed.
+Retain slot selections by instance UUID while switching. Presentation choices must
+not stop collection or erase the other instances' history.
 
 `AISnapshot` keeps instances and their models separate; identical model names on
 two servers never merge. An old model-load event alone does not prove that the

@@ -7,6 +7,34 @@ import Testing
 struct AIReadoutTests {
     private let formatter = MetricFormatter(settings: GeneralSettings())
 
+    @Test("the panel always selects one available instance")
+    func panelRequiresSingleInstance() throws {
+        let snapshot = SnapshotFixtures.ai()
+        let first = try #require(snapshot.instances.first?.id)
+        #expect(AIReadoutSummary.instanceSelection(nil, in: snapshot, allowsAllInstances: false) == first)
+        #expect(AIReadoutSummary.instanceSelection(UUID(), in: snapshot, allowsAllInstances: false) == first)
+        #expect(AIReadoutSummary.instanceSelection(first, in: AISnapshot(), allowsAllInstances: false) == nil)
+    }
+
+    @Test("the remembered instance is resolved by UUID after renaming and reordering")
+    func instanceSelectionKeepsIdentity() throws {
+        var snapshot = SnapshotFixtures.ai()
+        let selected = try #require(snapshot.instances.last?.id)
+        #expect(AIReadoutSummary.instanceSelection(selected, in: snapshot, allowsAllInstances: false) == selected)
+        snapshot.instances.reverse()
+        for index in snapshot.instances.indices { snapshot.instances[index].name = "Same name" }
+        #expect(AIReadoutSummary.instanceSelection(selected, in: snapshot, allowsAllInstances: false) == selected)
+    }
+
+    @Test("the widget retains All instances and its individual instance selection")
+    func widgetAllowsAllInstances() throws {
+        let snapshot = SnapshotFixtures.ai()
+        let selected = try #require(snapshot.instances.last?.id)
+        #expect(AIReadoutSummary.instanceSelection(nil, in: snapshot, allowsAllInstances: true) == nil)
+        #expect(AIReadoutSummary.instanceSelection(UUID(), in: snapshot, allowsAllInstances: true) == nil)
+        #expect(AIReadoutSummary.instanceSelection(selected, in: snapshot, allowsAllInstances: true) == selected)
+    }
+
     @Test("instance warnings describe failures without treating disabled APIs or idle models as errors")
     func instanceWarnings() {
         var instance = SnapshotFixtures.ai().instances[0]

@@ -368,14 +368,16 @@ public enum PanelModule: String, Sendable, Codable, CaseIterable, Equatable, Has
 /// The panel used to be configurable — module order, which modules were on, width,
 /// process row count and sort, sparklines, focus behaviour. All of it is gone: the
 /// panel is a glance surface reached by one click, and a settings pane with eight
-/// controls governing it was more configuration than the surface earns. What remains
-/// is the one piece of state the user still sets, and they set it by clicking a
-/// heading in the panel itself rather than by opening a window.
+/// controls governing it was more configuration than the surface earns. Its saved
+/// choices now come from the panel itself: expanded module, history visibility,
+/// and the last viewed AI instance.
 public struct PanelSettings: Sendable, Codable, Equatable {
     /// Modules the user has collapsed to just their summary row.
     public var collapsedModules: Set<PanelModule>
     /// Draw the history chart under an expanded module's rows.
     public var showsHistoryChart: Bool
+    /// Stable identity survives panel recreation, app restarts, and instance renames.
+    public var selectedAIInstanceID: UUID?
 
     /// Fixed layout, previously the `width` setting. 380pt gives a detail grid three
     /// columns and a process name room beside its icon, and still leaves the panel
@@ -386,9 +388,10 @@ public struct PanelSettings: Sendable, Codable, Equatable {
     public static let processSortKey: ProcessSortKey = .cpu
 
     public init(collapsedModules: Set<PanelModule> = PanelSettings.defaultCollapsed,
-                showsHistoryChart: Bool = true) {
+                showsHistoryChart: Bool = true, selectedAIInstanceID: UUID? = nil) {
         self.collapsedModules = Self.accordion(collapsedModules)
         self.showsHistoryChart = showsHistoryChart
+        self.selectedAIInstanceID = selectedAIInstanceID
     }
 
     /// The collapsed set after a click on `module`'s header.
@@ -435,7 +438,7 @@ public struct PanelSettings: Sendable, Codable, Equatable {
     public var visibleModules: [PanelModule] { PanelModule.allCases }
 
     private enum CodingKeys: String, CodingKey {
-        case collapsedModules, showsHistoryChart
+        case collapsedModules, showsHistoryChart, selectedAIInstanceID
     }
 
     /// Decoded leniently, and settings files written before the panel pane was removed
@@ -445,6 +448,7 @@ public struct PanelSettings: Sendable, Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         collapsedModules = Self.accordion(c.value(.collapsedModules, or: PanelSettings.defaultCollapsed))
         showsHistoryChart = c.value(.showsHistoryChart, or: true)
+        selectedAIInstanceID = c.value(.selectedAIInstanceID, or: nil)
     }
 }
 

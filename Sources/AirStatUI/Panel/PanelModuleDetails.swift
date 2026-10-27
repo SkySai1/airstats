@@ -570,7 +570,11 @@ extension PanelModuleView {
         section(engine.ai) { snapshot in
             AIInstanceMetricsView(snapshot: snapshot, history: engine.aiHistory,
                                   isCompact: false,
-                                  tint: chartTint, usesMetricGrid: true)
+                                  tint: chartTint, usesMetricGrid: true,
+                                  allowsAllInstances: false,
+                                  rememberedInstanceID: Binding(
+                                    get: { settings.settings.panel.selectedAIInstanceID },
+                                    set: { id in settings.update { $0.panel.selectedAIInstanceID = id } }))
         }
     }
 

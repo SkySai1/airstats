@@ -105,9 +105,11 @@ Charts average those rate samples; requests without live samples use total token
 divided by measured generation time. A final request timing does not duplicate its
 live samples. Different instances remain separate even when they serve the same model.
 
-Use the Instance selector in the panel or widget to view All instances or a single
-configured instance. Metrics and charts follow that selection; each instance keeps
-its own slot selection when switching between instances.
+The panel's Instance selector shows one configured instance and remembers the last
+viewed instance across openings and app restarts. If it is removed, the panel opens
+the first available instance. The widget also offers All instances. Metrics and
+charts follow the selection; each instance keeps its own slot selection when
+switching between instances.
 
 Use the Slot selector to switch between All slots and an
 individual reported slot. Each slot keeps its own task ID, Prefill/Answer stage,
